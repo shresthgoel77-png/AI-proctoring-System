@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FaceLandmarker, FilesetResolver, NormalizedLandmark } from '@mediapipe/tasks-vision';
+import { ShaderBackground } from './shaderbackground';
 
 interface EventLogItem {
   timestamp: string;
@@ -25,6 +26,9 @@ export default function App() {
   const gazeAwayStartTimeRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // VeritasEdge States
+  const [hasStarted, setHasStarted] = useState(false);
+
   // React State for macro UI updates (alerts and logs)
   const [modelLoading, setModelLoading] = useState(true);
   const [webcamActive, setWebcamActive] = useState(false);
@@ -36,6 +40,12 @@ export default function App() {
   // State refs to track exact status values inside requestAnimationFrame without enclosure issues
   const lookingAwayRef = useRef(false);
   const multipleFacesRef = useRef(false);
+
+  // Telemetry smoothing filters to prevent visual stuttering and erratic alerts
+  const smoothedYawRef = useRef<number>(1.0);
+  const smoothedPitchRef = useRef<number>(0.6);
+  const smoothedLeftIrisRef = useRef<number>(0.0);
+  const smoothedRightIrisRef = useRef<number>(0.0);
 
   // Helper to add log entries
   const addLog = (message: string, type: 'info' | 'warning' | 'error' | 'success') => {
@@ -50,7 +60,6 @@ export default function App() {
     async function initMediaPipe() {
       try {
         setStatusText('Loading browser WebAssembly files...');
-        // Using a reliable CDN path matching the libraries
         const filesetResolver = await FilesetResolver.forVisionTasks(
           'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm'
         );
@@ -64,7 +73,7 @@ export default function App() {
             delegate: 'GPU'
           },
           runningMode: 'VIDEO',
-          numFaces: 4, // Set up multi-face tracking
+          numFaces: 4,
           outputFaceBlendshapes: true
         });
 
@@ -146,7 +155,7 @@ export default function App() {
 
   // Perform processing in the requestAnimationFrame loop
   useEffect(() => {
-    if (!webcamActive || modelLoading || !videoRef.current || !canvasRef.current) return;
+    if (!webcamActive || modelLoading || !videoRef.current || !canvasRef.current || !hasStarted) return;
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -154,25 +163,21 @@ export default function App() {
     if (!ctx) return;
 
     let lastVideoTime = -1;
+    const alpha = 0.08; // Telemetry EMA Smoothing Factor (smaller = smoother, larger = responsive)
 
     const renderLoop = () => {
-      // Confirm video is ready
       if (video.readyState >= 2) {
-        // Adjust canvas dimensions if mismatch
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
         }
 
-        // Draw webcam feed onto canvas
         ctx.save();
-        // Mirror the webcam feed horizontally for natural look
         ctx.translate(canvas.width, 0);
         ctx.scale(-1, 1);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         ctx.restore();
 
-        // Perform AI computation
         const timestamp = performance.now();
         if (video.currentTime !== lastVideoTime && faceLandmarkerRef.current) {
           lastVideoTime = video.currentTime;
@@ -200,66 +205,61 @@ export default function App() {
             if (numFaces > 0) {
               const landmarks = results.faceLandmarks[0];
 
-              // Make sure critical indices exist
               if (landmarks[33] && landmarks[133] && landmarks[263] && landmarks[362] && landmarks[468] && landmarks[473]) {
                 const project = (l: NormalizedLandmark) => ({
-                  x: (1 - l.x) * canvas.width, // Mirroring x-coordinate because canvas mirror mapping
+                  x: (1 - l.x) * canvas.width,
                   y: l.y * canvas.height
                 });
 
-                // Calculate metrics
-                // 2.1 Head Yaw (Eye horizontal span symmetry)
-                // Nose Tip is 1, Left Eye Outer is 33, Right Eye Outer is 263
+                // Compute Raw Metrics
                 const pNose = project(landmarks[1]);
                 const pLeftEyeOuter = project(landmarks[33]);
                 const pRightEyeOuter = project(landmarks[263]);
-                // Remember: Mirrored screen coordinates
                 const leftSpan = Math.abs(pNose.x - pLeftEyeOuter.x);
                 const rightSpan = Math.abs(pNose.x - pRightEyeOuter.x);
-                const yawRatio = rightSpan > 0 ? leftSpan / rightSpan : 1;
+                const yawRatio = rightSpan > 0 ? leftSpan / rightSpan : 1.0;
 
-                // 2.2 Head Pitch (Nose vertical ratio)
-                // Face Forehead is 10, Chin is 152
                 const pForehead = project(landmarks[10]);
                 const pChin = project(landmarks[152]);
                 const upperSpan = Math.abs(pNose.y - pForehead.y);
                 const lowerSpan = Math.abs(pNose.y - pChin.y);
                 const pitchRatio = lowerSpan > 0 ? upperSpan / lowerSpan : 0.6;
 
-                // 2.3 Eyeball Iris Offsets
-                // Left Eye: Outer 33, Inner 133. Left Iris Center is 468
                 const pLeftInner = project(landmarks[133]);
                 const pLeftOuter = project(landmarks[33]);
                 const leftEyeWidth = Math.abs(pLeftInner.x - pLeftOuter.x);
                 const leftEyeMid = (pLeftInner.x + pLeftOuter.x) / 2;
                 const leftIrisOffset = leftEyeWidth > 0 ? (project(landmarks[468]).x - leftEyeMid) / (leftEyeWidth / 2) : 0;
 
-                // Right Eye: Inner 362, Outer 263. Right Iris Center is 473
                 const pRightInner = project(landmarks[362]);
                 const pRightOuter = project(landmarks[263]);
                 const rightEyeWidth = Math.abs(pRightInner.x - pRightOuter.x);
                 const rightEyeMid = (pRightInner.x + pRightOuter.x) / 2;
                 const rightIrisOffset = rightEyeWidth > 0 ? (project(landmarks[473]).x - rightEyeMid) / (rightEyeWidth / 2) : 0;
 
-                // 2.4 Eye Vertical Iris offset
                 const leftIrisYOffset = leftEyeWidth > 0 ? (project(landmarks[468]).y - (pLeftInner.y + pLeftOuter.y) / 2) / leftEyeWidth : 0;
 
-                // Update Telemetry Panel using direct refs (Avoid 60fps React renders)
-                if (yawValRef.current) yawValRef.current.innerText = yawRatio.toFixed(3);
-                if (pitchValRef.current) pitchValRef.current.innerText = pitchRatio.toFixed(3);
-                if (leftIrisOffsetRef.current) leftIrisOffsetRef.current.innerText = leftIrisOffset.toFixed(3);
-                if (rightIrisOffsetRef.current) rightIrisOffsetRef.current.innerText = rightIrisOffset.toFixed(3);
+                // Apply Exponential Moving Average (EMA) to prevent twitching/stuttering
+                smoothedYawRef.current = alpha * yawRatio + (1 - alpha) * smoothedYawRef.current;
+                smoothedPitchRef.current = alpha * pitchRatio + (1 - alpha) * smoothedPitchRef.current;
+                smoothedLeftIrisRef.current = alpha * leftIrisOffset + (1 - alpha) * smoothedLeftIrisRef.current;
+                smoothedRightIrisRef.current = alpha * rightIrisOffset + (1 - alpha) * smoothedRightIrisRef.current;
 
-                // 2.5 Determine Gaze State
-                // True if head turned left/right, tilted up/down, or eyes looked away
+                // Update Telemetry Panel using direct refs (formatted to exactly 3 decimal places)
+                if (yawValRef.current) yawValRef.current.innerText = smoothedYawRef.current.toFixed(3);
+                if (pitchValRef.current) pitchValRef.current.innerText = smoothedPitchRef.current.toFixed(3);
+                if (leftIrisOffsetRef.current) leftIrisOffsetRef.current.innerText = smoothedLeftIrisRef.current.toFixed(3);
+                if (rightIrisOffsetRef.current) rightIrisOffsetRef.current.innerText = smoothedRightIrisRef.current.toFixed(3);
+
+                // Determine gaze state based on smoothed metrics
                 const isLookAway =
-                  yawRatio < 0.60 || yawRatio > 1.65 ||     // yaw boundary
-                  pitchRatio < 0.40 || pitchRatio > 1.25 ||   // pitch boundary
-                  Math.abs(leftIrisOffset) > 0.25 ||         // look far left/right
-                  Math.abs(rightIrisOffset) > 0.25 ||
-                  leftIrisYOffset > 0.16 || leftIrisYOffset < -0.16; // look up/down
+                  smoothedYawRef.current < 0.60 || smoothedYawRef.current > 1.65 ||
+                  smoothedPitchRef.current < 0.40 || smoothedPitchRef.current > 1.25 ||
+                  Math.abs(smoothedLeftIrisRef.current) > 0.25 ||
+                  Math.abs(smoothedRightIrisRef.current) > 0.25 ||
+                  leftIrisYOffset > 0.16 || leftIrisYOffset < -0.16;
 
-                // 2.6 Evaluate Gaze Timer (5-second rule)
+                // Evaluate Gaze Timer (5-second rule)
                 let elapsedSeconds = 0;
                 if (isLookAway) {
                   if (gazeAwayStartTimeRef.current === null) {
@@ -286,7 +286,7 @@ export default function App() {
                   }
                 }
 
-                // Update timer UI using direct CSS modifications
+                // Update timer UI directly
                 if (gazeBarRef.current && gazeTextRef.current) {
                   const percent = Math.min((elapsedSeconds / 5) * 100, 100);
                   gazeBarRef.current.style.width = `${percent}%`;
@@ -301,11 +301,10 @@ export default function App() {
                   }
                 }
 
-                // 2.7 Canvas Rendering of Mesh
+                // Canvas Rendering of Mesh
                 const isViolation = lookingAwayRef.current || multipleFacesRef.current;
                 const strokeColor = isViolation ? 'rgba(255, 30, 80, 0.6)' : 'rgba(0, 229, 255, 0.6)';
                 
-                // Draw connecting features (Eyebrows, Eyes, Mouth, Nose Bridge)
                 const drawFeature = (indices: number[], color: string, thickness: number, close: boolean = false) => {
                   ctx.beginPath();
                   const pStart = project(landmarks[indices[0]]);
@@ -330,7 +329,6 @@ export default function App() {
                 drawFeature(outerMouth, strokeColor, 1.5, true);
                 drawFeature(noseBridge, strokeColor, 1.5);
 
-                // Draw Irises
                 ctx.fillStyle = isLookAway ? '#ff3366' : '#00ffd2';
                 const pLeftIris = project(landmarks[468]);
                 ctx.beginPath();
@@ -342,11 +340,10 @@ export default function App() {
                 ctx.arc(pRightIris.x, pRightIris.y, 4, 0, Math.PI * 2);
                 ctx.fill();
 
-                // Draw Gaze Vector from nose-tip
+                // Draw Smooth Gaze Direction pointer based on EMA ratios
                 const gazeMultiplier = 120;
-                // Calculate gaze offsets
-                const gX = pNose.x + (leftIrisOffset + rightIrisOffset) * gazeMultiplier + (yawRatio - 1.0) * 110;
-                const gY = pNose.y + leftIrisYOffset * 2 * gazeMultiplier + (pitchRatio - 0.6) * 110;
+                const gX = pNose.x + (smoothedLeftIrisRef.current + smoothedRightIrisRef.current) * gazeMultiplier + (smoothedYawRef.current - 1.0) * 110;
+                const gY = pNose.y + leftIrisYOffset * 2 * gazeMultiplier + (smoothedPitchRef.current - 0.6) * 110;
 
                 ctx.beginPath();
                 ctx.moveTo(pNose.x, pNose.y);
@@ -360,7 +357,6 @@ export default function App() {
                 ctx.arc(gX, gY, 6, 0, Math.PI * 2);
                 ctx.fill();
 
-                // Draw Bounding Box around detected face
                 const xCoordinates = landmarks.map(l => (1 - l.x) * canvas.width);
                 const yCoordinates = landmarks.map(l => l.y * canvas.height);
                 const minX = Math.min(...xCoordinates);
@@ -374,7 +370,6 @@ export default function App() {
                 ctx.strokeRect(minX - 12, minY - 12, (maxX - minX) + 24, (maxY - minY) + 24);
                 ctx.setLineDash([]);
 
-                // Bounding box status tag
                 ctx.fillStyle = isLookAway ? '#ff3366' : '#00e5ff';
                 ctx.font = '11px system-ui';
                 ctx.fillText(`CANDIDATE_01`, minX - 10, minY - 18);
@@ -396,7 +391,7 @@ export default function App() {
         cancelAnimationFrame(requestRef.current);
       }
     };
-  }, [webcamActive, modelLoading]);
+  }, [webcamActive, modelLoading, hasStarted]);
 
   // Clean-up on unmount
   useEffect(() => {
@@ -405,13 +400,40 @@ export default function App() {
     };
   }, []);
 
+  // Render full-screen VeritasEdge Landing Page if hasStarted is false
+  if (!hasStarted) {
+    return (
+      <div className="landing-page-wrapper">
+        {/* Layer 1: Background Canvas */}
+        <div className="landing-bg-layer">
+          <ShaderBackground />
+        </div>
+
+        {/* Layer 2: Foreground UI Elements */}
+        <div className="landing-fg-layer">
+          <div className="landing-card">
+            <div className="landing-badge">DECENTRALIZED WORKSTATION</div>
+            <h1 className="landing-title">VeritasEdge</h1>
+            <h2 className="landing-subtitle">Decentralized AI Proctoring Suite</h2>
+            <p className="landing-desc">
+              Next-generation academic integrity suite offering fully local, real-time gaze monitoring, multi-face presence validation, and anti-jitter telemetry filters. No database records. 100% client privacy.
+            </p>
+            <button className="landing-btn" onClick={() => setHasStarted(true)}>
+              Try Now
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="proctor-app">
       {/* HEADER SECTION */}
       <header className="app-header">
         <div className="brand">
           <div className="pulse-dot"></div>
-          <h1>AI Proctoring Engine <span className="badge">Edge AI POC</span></h1>
+          <h1>VeritasEdge <span className="badge">AI Proctoring POC</span></h1>
         </div>
         <div className="system-status">
           Status: <strong>{statusText}</strong>
@@ -548,6 +570,11 @@ export default function App() {
           </div>
         </main>
       )}
+
+      {/* DEVELOPER FOOTER */}
+      <footer className="dev-footer">
+        built by Shredev with ❤️
+      </footer>
     </div>
   );
 }
