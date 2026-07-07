@@ -1,50 +1,60 @@
-# React + TypeScript + Vite
+# 🛡️ VeritasEdge: Decentralized AI Proctoring Suite
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+![React](https://img.shields.io/badge/react-%2320232a.svg?style=for-the-badge&logo=react&logoColor=%2361DAFB)
+![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=for-the-badge&logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/vite-%23646CFF.svg?style=for-the-badge&logo=vite&logoColor=white)
+![MediaPipe](https://img.shields.io/badge/MediaPipe-00A971?style=for-the-badge&logo=google&logoColor=white)
 
-Currently, two official plugins are available:
+VeritasEdge is a lightweight, zero-backend Edge AI Proctoring Proof of Concept (POC). It transitions heavy, server-dependent computer vision tasks completely to the client side. By running directly in the browser via WebAssembly (WASM), it ensures **$0 server compute costs** and **absolute user privacy** (video frames never leave the candidate's device).
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## ✨ Key Features
 
-## Expanding the ESLint configuration
+* **Zero-Backend Architecture:** 100% client-side inference using Google's `@mediapipe/tasks-vision`.
+* **Gaze Tracking & 5-Second Rule:** Real-time iris tracking calculates pitch/yaw. If a candidate looks away from the screen for > 5 continuous seconds, a critical security flag is triggered.
+* **Multi-Face Security Alerts:** Instantaneous detection of multiple individuals within the webcam frame to prevent unauthorized assistance.
+* **Anti-Jitter Telemetry (EMA):** Raw vision telemetry is smoothed using an Exponential Moving Average (EMA) filter, providing a stable, flicker-free UI dashboard.
+* **Custom OGL WebGL Landing Page:** A highly optimized, custom `ogl` WebGL shader background that avoids the standard tree-shaking and memory leak issues of heavier 3D React wrapper libraries.
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+## 🛠️ Tech Stack
 
-- Configure the top-level `parserOptions` property like this:
+* **Core:** React 18, TypeScript, Vite
+* **Computer Vision:** Google MediaPipe (`FaceLandmarker`)
+* **Graphics/Landing Page:** OGL (Ultra-lightweight WebGL)
+* **Styling:** Modern CSS / Flexbox
 
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+## 🚀 Getting Started
+
+### ⚙️ Prerequisites
+Make sure you have Node.js installed on your local machine.
+
+🚀 Installation
+Clone the repository:
+
+```Bash
+git clone https://github.com/shresthgoel77-png/AI-proctoring-System.git
 ```
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+Navigate into the project directory:
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
-
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
+```Bash
+cd AI-proctoring-System
 ```
+Install dependencies: (This will install all required packages, including Google MediaPipe and OGL)
+```Bash
+npm install
+```
+Start the local development server:
+```Bash
+npm run dev
+```
+🌍 Deployment
+
+This project is fully optimized for static deployment. You can deploy the dist folder directly to Vercel, Netlify, or GitHub Pages with zero backend configuration required.
+
+To generate the optimized production build, run:
+```Bash
+npm run build
+```
+---
+Built by Shredev with ❤️
+---
