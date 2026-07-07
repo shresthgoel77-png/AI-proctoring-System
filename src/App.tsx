@@ -573,7 +573,7 @@ export default function App() {
 
       {/* DEVELOPER FOOTER */}
       <footer className="dev-footer">
-        built by Shredev with ❤️
+        Built by Shredev with ❤️
       </footer>
     </div>
   );
