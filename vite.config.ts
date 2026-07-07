@@ -3,5 +3,5 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/AI-proctoring-System/', // Add this line!
+  base: '/', // Change this back to '/' or remove the line completely
 })
